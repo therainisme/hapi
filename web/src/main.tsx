@@ -11,8 +11,6 @@ import { queryClient } from './lib/query-client'
 import { createAppRouter } from './router'
 import { I18nProvider } from './lib/i18n-context'
 
-initializeFontScale()
-
 function getStartParam(): string | null {
     const query = new URLSearchParams(window.location.search)
     const fromQuery = query.get('startapp') || query.get('tgWebAppStartParam')
@@ -35,6 +33,8 @@ function getInitialPath(): string {
 }
 
 async function bootstrap() {
+    initializeFontScale()
+
     // Only load Telegram SDK in Telegram environment (with 3s timeout)
     const isTelegram = isTelegramEnvironment()
     if (isTelegram) {

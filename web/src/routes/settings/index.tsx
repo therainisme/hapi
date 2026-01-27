@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
-import { fontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
+import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
     { value: 'en', nativeLabel: 'English' },
@@ -84,6 +84,7 @@ export default function SettingsPage() {
         return localStorage.getItem('hapi-voice-lang')
     })
 
+    const fontScaleOptions = getFontScaleOptions()
     const currentLocale = locales.find((loc) => loc.value === locale)
     const currentFontScaleLabel = fontScaleOptions.find((opt) => opt.value === fontScale)?.label ?? '100%'
     const currentVoiceLanguage = voiceLanguages.find((lang) => lang.code === voiceLanguage)
