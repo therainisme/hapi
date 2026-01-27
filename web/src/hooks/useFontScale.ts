@@ -13,6 +13,30 @@ export const fontScaleOptions: ReadonlyArray<{ value: FontScale; label: string }
 const FONT_SCALE_KEY = 'hapi-font-scale'
 const DEFAULT_FONT_SCALE: FontScale = 1
 
+function safeGetItem(key: string): string | null {
+    try {
+        return localStorage.getItem(key)
+    } catch {
+        return null
+    }
+}
+
+function safeSetItem(key: string, value: string): void {
+    try {
+        localStorage.setItem(key, value)
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function safeRemoveItem(key: string): void {
+    try {
+        localStorage.removeItem(key)
+    } catch {
+        // Ignore storage errors
+    }
+}
+
 function parseFontScale(raw: string | null): FontScale {
     const value = Number(raw)
     if (value === 0.8 || value === 0.9 || value === 1 || value === 1.1 || value === 1.2) {
@@ -25,7 +49,12 @@ function applyFontScale(scale: FontScale): void {
     document.documentElement.style.setProperty('--app-font-scale', String(scale))
 }
 
-let currentFontScale: FontScale = parseFontScale(localStorage.getItem(FONT_SCALE_KEY))
+let currentFontScale: FontScale = DEFAULT_FONT_SCALE
+try {
+    currentFontScale = parseFontScale(safeGetItem(FONT_SCALE_KEY))
+} catch {
+    // Ignore storage errors
+}
 const listeners = new Set<() => void>()
 let listenersInitialized = false
 
@@ -53,9 +82,9 @@ export function setFontScale(scale: FontScale): void {
     applyFontScale(scale)
 
     if (scale === DEFAULT_FONT_SCALE) {
-        localStorage.removeItem(FONT_SCALE_KEY)
+        safeRemoveItem(FONT_SCALE_KEY)
     } else {
-        localStorage.setItem(FONT_SCALE_KEY, String(scale))
+        safeSetItem(FONT_SCALE_KEY, String(scale))
     }
 
     notify()
@@ -72,7 +101,7 @@ function updateFromStorage(newValue: string | null): void {
 }
 
 export function initializeFontScale(): void {
-    updateFromStorage(localStorage.getItem(FONT_SCALE_KEY))
+    updateFromStorage(safeGetItem(FONT_SCALE_KEY))
 
     if (listenersInitialized) {
         return
