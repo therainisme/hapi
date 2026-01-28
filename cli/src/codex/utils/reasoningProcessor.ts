@@ -206,6 +206,16 @@ export class ReasoningProcessor {
     }
 
     /**
+     * Finalize the current reasoning section (if any) with an explicit status.
+     * Useful at turn boundaries when the backend doesn't emit a final reasoning payload.
+     */
+    finalize(status: 'completed' | 'canceled'): void {
+        logger.debug(`[ReasoningProcessor] Finalize called with status: ${status}`);
+        this.finishCurrentToolCall(status);
+        this.resetState();
+    }
+
+    /**
      * Reset the processor state
      */
     reset(): void {
@@ -218,7 +228,7 @@ export class ReasoningProcessor {
      */
     private finishCurrentToolCall(status: 'completed' | 'canceled'): void {
         if (this.toolCallStarted && this.currentCallId) {
-            // Send tool call result with canceled status
+            // Send tool call result with status
             const toolResult: ReasoningToolResult = {
                 type: 'tool-call-result',
                 callId: this.currentCallId,

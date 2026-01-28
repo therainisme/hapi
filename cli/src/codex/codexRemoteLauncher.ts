@@ -215,6 +215,17 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         this.reasoningProcessor = reasoningProcessor;
         this.diffProcessor = diffProcessor;
 
+        const sendReady = () => {
+            session.sendSessionEvent({ type: 'ready' });
+        };
+
+        // State for coordinating ready/thinking with event-driven backends (avoid TDZ in handlers).
+        let wasCreated = false;
+        let currentModeHash: string | null = null;
+        let pending: { message: string; mode: EnhancedMode; isolate: boolean; hash: string } | null = null;
+        let first = true;
+        let turnInFlight = false;
+
         const handleCodexEvent = (msg: Record<string, unknown>) => {
             const msgType = asString(msg.type);
             if (!msgType) return;
@@ -274,14 +285,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 messageBuffer.addMessage('Starting task...', 'status');
             } else if (msgType === 'task_complete') {
                 messageBuffer.addMessage('Task completed', 'status');
-                sendReady();
             } else if (msgType === 'turn_aborted') {
                 messageBuffer.addMessage('Turn aborted', 'status');
-                sendReady();
             } else if (msgType === 'task_failed') {
                 const error = asString(msg.error);
                 messageBuffer.addMessage(error ? `Task failed: ${error}` : 'Task failed', 'status');
-                sendReady();
             }
 
             if (msgType === 'task_started') {
@@ -301,8 +309,23 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     logger.debug('thinking completed');
                     session.onThinkingChange(false);
                 }
+                permissionHandler.reset();
+                if (msgType === 'task_complete') {
+                    reasoningProcessor.finalize('completed');
+                } else {
+                    reasoningProcessor.finalize('canceled');
+                }
                 diffProcessor.reset();
                 appServerEventConverter?.reset();
+
+                if (useAppServer) {
+                    emitReadyIfIdle({
+                        pending,
+                        queueSize: () => session.queue.size(),
+                        shouldExit: this.shouldExit,
+                        sendReady
+                    });
+                }
             }
             if (msgType === 'agent_reasoning_section_break') {
                 reasoningProcessor.handleSectionBreak();
@@ -464,10 +487,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             } catch {}
         }
 
-        const sendReady = () => {
-            session.sendSessionEvent({ type: 'ready' });
-        };
-
         const syncSessionId = () => {
             if (!mcpClient) return;
             const clientSessionId = mcpClient.getSessionId();
@@ -487,12 +506,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         } else if (mcpClient) {
             await mcpClient.connect();
         }
-
-        let wasCreated = false;
-        let currentModeHash: string | null = null;
-        let pending: { message: string; mode: EnhancedMode; isolate: boolean; hash: string } | null = null;
-        let first = true;
-        let turnInFlight = false;
 
         while (!this.shouldExit) {
             logActiveHandles('loop-top');
@@ -533,6 +546,13 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
             messageBuffer.addMessage(message.message, 'user');
             currentModeHash = message.hash;
+            if (!session.thinking) {
+                logger.debug('thinking started');
+                session.onThinkingChange(true);
+            }
+            if (useAppServer) {
+                turnInFlight = true;
+            }
 
             try {
                 if (!wasCreated) {
@@ -666,12 +686,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     }
                 }
             } finally {
-                permissionHandler.reset();
-                reasoningProcessor.abort();
-                diffProcessor.reset();
-                appServerEventConverter?.reset();
-                session.onThinkingChange(false);
                 if (!useAppServer || !turnInFlight) {
+                    permissionHandler.reset();
+                    reasoningProcessor.abort();
+                    diffProcessor.reset();
+                    appServerEventConverter?.reset();
+                    if (session.thinking) {
+                        session.onThinkingChange(false);
+                    }
                     emitReadyIfIdle({
                         pending,
                         queueSize: () => session.queue.size(),
