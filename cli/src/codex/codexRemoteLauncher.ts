@@ -225,17 +225,35 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let pending: { message: string; mode: EnhancedMode; isolate: boolean; hash: string } | null = null;
         let first = true;
         let turnInFlight = false;
-        let pendingTurnEnd: { type: 'task_complete' | 'turn_aborted' | 'task_failed' } | null = null;
+        let pendingTurnEnd: { type: 'task_complete' | 'turn_aborted' | 'task_failed'; turnId: string | null; receivedAt: number } | null = null;
+        let settleTurnEndTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const TURN_COMPLETE_SETTLE_GRACE_MS = 1000;
 
         const settleAppServerTurnIfReady = () => {
             if (!useAppServer) return;
             if (!pendingTurnEnd) return;
+            if (pendingTurnEnd.type === 'task_complete') {
+                const elapsed = Date.now() - pendingTurnEnd.receivedAt;
+                if (elapsed < TURN_COMPLETE_SETTLE_GRACE_MS) {
+                    if (settleTurnEndTimer) {
+                        clearTimeout(settleTurnEndTimer);
+                    }
+                    settleTurnEndTimer = setTimeout(() => {
+                        settleTurnEndTimer = null;
+                        settleAppServerTurnIfReady();
+                    }, TURN_COMPLETE_SETTLE_GRACE_MS - elapsed);
+                    settleTurnEndTimer.unref();
+                    return;
+                }
+            }
             if (pendingTurnEnd.type === 'task_complete' && appServerEventConverter?.hasPendingItems()) {
                 logger.debug(`[Codex] Turn ended (${pendingTurnEnd.type}) but pending items remain (${appServerEventConverter.getPendingItemCount()}); deferring ready`);
                 return;
             }
 
             turnInFlight = false;
+            this.currentTurnId = null;
             permissionHandler.reset();
             if (pendingTurnEnd.type === 'task_complete') {
                 reasoningProcessor.finalize('completed');
@@ -251,6 +269,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
 
             pendingTurnEnd = null;
+            if (settleTurnEndTimer) {
+                clearTimeout(settleTurnEndTimer);
+                settleTurnEndTimer = null;
+            }
 
             emitReadyIfIdle({
                 pending,
@@ -264,6 +286,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             const msgType = asString(msg.type);
             if (!msgType) return;
 
+            const turnId = asString(msg.turn_id ?? msg.turnId);
+
             if (msgType === 'thread_started') {
                 const threadId = asString(msg.thread_id ?? msg.threadId);
                 if (threadId) {
@@ -273,14 +297,20 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 return;
             }
 
+            if (useAppServer && (msgType === 'task_complete' || msgType === 'turn_aborted' || msgType === 'task_failed')) {
+                if (turnId && this.currentTurnId && turnId !== this.currentTurnId) {
+                    logger.debug(`[Codex] Ignoring ${msgType} for stale turn ${turnId} (current=${this.currentTurnId})`);
+                    return;
+                }
+            }
+
             if (msgType === 'task_started') {
-                const turnId = asString(msg.turn_id ?? msg.turnId);
                 if (turnId) {
                     this.currentTurnId = turnId;
                 }
             }
 
-            if (msgType === 'task_complete' || msgType === 'turn_aborted' || msgType === 'task_failed') {
+            if (!useAppServer && (msgType === 'task_complete' || msgType === 'turn_aborted' || msgType === 'task_failed')) {
                 this.currentTurnId = null;
             }
 
@@ -338,7 +368,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
             if (msgType === 'task_complete' || msgType === 'turn_aborted' || msgType === 'task_failed') {
                 if (useAppServer) {
-                    pendingTurnEnd = { type: msgType };
+                    pendingTurnEnd = { type: msgType, turnId, receivedAt: Date.now() };
                     settleAppServerTurnIfReady();
                     return;
                 }
