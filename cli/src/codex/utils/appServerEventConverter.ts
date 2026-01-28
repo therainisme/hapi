@@ -82,10 +82,47 @@ export class AppServerEventConverter {
     private readonly commandOutputBuffers = new Map<string, string>();
     private readonly commandMeta = new Map<string, Record<string, unknown>>();
     private readonly fileChangeMeta = new Map<string, Record<string, unknown>>();
+    private readonly pendingItems = new Set<string>();
+
+    private trackPendingItems(method: string, paramsRecord: Record<string, unknown>): void {
+        if (!method.startsWith('item/')) return;
+
+        if (method === 'item/started') {
+            const itemId = extractItemId(paramsRecord);
+            if (itemId) {
+                this.pendingItems.add(itemId);
+            }
+            return;
+        }
+
+        if (method === 'item/completed') {
+            const itemId = extractItemId(paramsRecord);
+            if (itemId) {
+                this.pendingItems.delete(itemId);
+            }
+            return;
+        }
+
+        if (method.endsWith('/delta') || method.includes('Delta')) {
+            const itemId = extractItemId(paramsRecord);
+            if (itemId) {
+                this.pendingItems.add(itemId);
+            }
+        }
+    }
+
+    hasPendingItems(): boolean {
+        return this.pendingItems.size > 0;
+    }
+
+    getPendingItemCount(): number {
+        return this.pendingItems.size;
+    }
 
     handleNotification(method: string, params: unknown): ConvertedEvent[] {
         const events: ConvertedEvent[] = [];
         const paramsRecord = asRecord(params) ?? {};
+        this.trackPendingItems(method, paramsRecord);
 
         if (method === 'thread/started' || method === 'thread/resumed') {
             const thread = asRecord(paramsRecord.thread) ?? paramsRecord;
@@ -309,5 +346,6 @@ export class AppServerEventConverter {
         this.commandOutputBuffers.clear();
         this.commandMeta.clear();
         this.fileChangeMeta.clear();
+        this.pendingItems.clear();
     }
 }

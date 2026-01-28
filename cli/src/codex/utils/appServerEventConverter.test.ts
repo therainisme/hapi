@@ -32,6 +32,28 @@ describe('AppServerEventConverter', () => {
         expect(failed).toEqual([{ type: 'task_failed', turn_id: 'turn-1', error: 'boom' }]);
     });
 
+    it('tracks pending items across started/completed and delta notifications', () => {
+        const converter = new AppServerEventConverter();
+        expect(converter.hasPendingItems()).toBe(false);
+        expect(converter.getPendingItemCount()).toBe(0);
+
+        converter.handleNotification('item/started', { item: { id: 'msg-1', type: 'agentMessage' } });
+        expect(converter.hasPendingItems()).toBe(true);
+        expect(converter.getPendingItemCount()).toBe(1);
+
+        converter.handleNotification('item/completed', { item: { id: 'msg-1', type: 'agentMessage' } });
+        expect(converter.hasPendingItems()).toBe(false);
+        expect(converter.getPendingItemCount()).toBe(0);
+
+        converter.handleNotification('item/agentMessage/delta', { itemId: 'msg-2', delta: 'Hello' });
+        expect(converter.hasPendingItems()).toBe(true);
+        expect(converter.getPendingItemCount()).toBe(1);
+
+        converter.handleNotification('item/completed', { item: { id: 'msg-2', type: 'agentMessage' } });
+        expect(converter.hasPendingItems()).toBe(false);
+        expect(converter.getPendingItemCount()).toBe(0);
+    });
+
     it('accumulates agent message deltas', () => {
         const converter = new AppServerEventConverter();
 

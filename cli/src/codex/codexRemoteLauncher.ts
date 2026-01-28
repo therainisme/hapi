@@ -225,6 +225,40 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let pending: { message: string; mode: EnhancedMode; isolate: boolean; hash: string } | null = null;
         let first = true;
         let turnInFlight = false;
+        let pendingTurnEnd: { type: 'task_complete' | 'turn_aborted' | 'task_failed' } | null = null;
+
+        const settleAppServerTurnIfReady = () => {
+            if (!useAppServer) return;
+            if (!pendingTurnEnd) return;
+            if (pendingTurnEnd.type === 'task_complete' && appServerEventConverter?.hasPendingItems()) {
+                logger.debug(`[Codex] Turn ended (${pendingTurnEnd.type}) but pending items remain (${appServerEventConverter.getPendingItemCount()}); deferring ready`);
+                return;
+            }
+
+            turnInFlight = false;
+            permissionHandler.reset();
+            if (pendingTurnEnd.type === 'task_complete') {
+                reasoningProcessor.finalize('completed');
+            } else {
+                reasoningProcessor.finalize('canceled');
+            }
+            diffProcessor.reset();
+            appServerEventConverter?.reset();
+
+            if (session.thinking) {
+                logger.debug('thinking completed');
+                session.onThinkingChange(false);
+            }
+
+            pendingTurnEnd = null;
+
+            emitReadyIfIdle({
+                pending,
+                queueSize: () => session.queue.size(),
+                shouldExit: this.shouldExit,
+                sendReady
+            });
+        };
 
         const handleCodexEvent = (msg: Record<string, unknown>) => {
             const msgType = asString(msg.type);
@@ -295,6 +329,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             if (msgType === 'task_started') {
                 if (useAppServer) {
                     turnInFlight = true;
+                    pendingTurnEnd = null;
                 }
                 if (!session.thinking) {
                     logger.debug('thinking started');
@@ -303,8 +338,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
             if (msgType === 'task_complete' || msgType === 'turn_aborted' || msgType === 'task_failed') {
                 if (useAppServer) {
-                    turnInFlight = false;
+                    pendingTurnEnd = { type: msgType };
+                    settleAppServerTurnIfReady();
+                    return;
                 }
+
                 if (session.thinking) {
                     logger.debug('thinking completed');
                     session.onThinkingChange(false);
@@ -317,15 +355,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 }
                 diffProcessor.reset();
                 appServerEventConverter?.reset();
-
-                if (useAppServer) {
-                    emitReadyIfIdle({
-                        pending,
-                        queueSize: () => session.queue.size(),
-                        shouldExit: this.shouldExit,
-                        sendReady
-                    });
-                }
             }
             if (msgType === 'agent_reasoning_section_break') {
                 reasoningProcessor.handleSectionBreak();
@@ -458,6 +487,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     const eventRecord = asRecord(event) ?? { type: undefined };
                     handleCodexEvent(eventRecord);
                 }
+                settleAppServerTurnIfReady();
             });
         } else if (mcpClient) {
             mcpClient.setPermissionHandler(permissionHandler);
