@@ -589,6 +589,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                             cliOverrides: session.codexCliOverrides
                         });
                         turnInFlight = true;
+                        if (!session.thinking) {
+                            session.onThinkingChange(true);
+                        }
                         const turnResponse = await appServerClient.startTurn(turnParams, {
                             signal: this.abortController.signal
                         });
@@ -628,6 +631,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         cliOverrides: session.codexCliOverrides
                     });
                     turnInFlight = true;
+                    if (!session.thinking) {
+                        session.onThinkingChange(true);
+                    }
                     const turnResponse = await appServerClient.startTurn(turnParams, {
                         signal: this.abortController.signal
                     });
@@ -670,8 +676,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 reasoningProcessor.abort();
                 diffProcessor.reset();
                 appServerEventConverter?.reset();
-                session.onThinkingChange(false);
                 if (!useAppServer || !turnInFlight) {
+                    session.onThinkingChange(false);
                     emitReadyIfIdle({
                         pending,
                         queueSize: () => session.queue.size(),
